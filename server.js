@@ -68,7 +68,7 @@ const getGuestListApi = async (roomUseId) => {
     // apiResponseData[roomID] = data;
 
     // 廣播給所有房間中的用戶
-    io.emit("GuestListResponse", data.data.guestNameList);
+    io.to(roomUseId).emit("GuestListResponse", data.data.guestNameList);
   } catch (error) {
     console.error(
       `Error fetching data from ${API_URL}/Guest/GuestList?roomUseId=${roomUseId}:`,

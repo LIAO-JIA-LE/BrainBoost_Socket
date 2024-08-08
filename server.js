@@ -11,7 +11,11 @@ app.use(cors());
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://localhost:8000", "http://localhost:8001"],
+    origin: [
+      "http://localhost:3000",
+      "http://localhost:8000",
+      "http://localhost:8001",
+    ],
     methods: ["GET", "POST"],
   },
 });
@@ -58,17 +62,16 @@ const API_URL = process.env.API_URL || "http://localhost:5001/BrainBoost";
 
 const getGuestListApi = async (roomUseId) => {
   try {
-    // const response = await axios.get(`${API_URL}/Guest/GuestList?roomId=6`);
-    // 後端要再開一隻API，用房間ID去取得房間的所有用戶
-    const response = await axios.get(`${API_URL}/Guest/GuestList?roomUseId=${roomUseId}`);
+    console.log("=========進入取得訪客列表Function=========");
+    const response = await axios.get(
+      `${API_URL}/Guest/GuestList?roomUseId=${roomUseId}`
+    );
     const data = response.data;
-    console.log("Data fetched from getGuestListApi:", data.data.guestNameList);
-    // 將回應值儲存起來，假設我們有多個房間
-    // const roomID = data.data.roomId; // 根據你的需求設定房間ID
-    // apiResponseData[roomID] = data;
+    console.log("Data from getGuestListApi:", data.data.guestNameList);
 
     // 廣播給所有房間中的用戶
-    io.to(roomUseId).emit("GuestListResponse", data.data.guestNameList);
+    JoinRoom.to(roomUseId).emit("GuestListResponse", data.data.guestNameList);
+    console.log("=========function執行完成=========");
   } catch (error) {
     console.error(
       `Error fetching data from ${API_URL}/Guest/GuestList?roomUseId=${roomUseId}:`,
@@ -86,7 +89,22 @@ const verifyToken = async (token) => {
       },
     });
     const data = response.data;
-    console.log("使用者資訊",data.data);
+    console.log("使用者資訊", data.data);
+    return data.data;
+  } catch (error) {
+    console.error("Token verification failed:");
+    return null;
+  }
+};
+const verifyTeacherToken = async (token) => {
+  try {
+    const response = await axios.get(`${API_URL}/User/MySelf`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const data = response.data;
+    console.log("老師資訊", data.data.userName);
     return data.data;
   } catch (error) {
     console.error("Token verification failed:");
@@ -94,28 +112,49 @@ const verifyToken = async (token) => {
   }
 };
 
-io.of("/JoinRoom").on("connection", (socket) => {
-  console.log("A user connected");
+const JoinRoom = io.of("/JoinRoom");
+JoinRoom.on("connection", (socket) => {
+  console.log("A Teacher connected");
+  socket.on("TjoinRoom", async (token,roomUseId) => {
+    const user = await verifyTeacherToken(token);
+    if (user === null || !user) {
+      socket.emit("error", "Invalid token");
+      return;
+    }
+    console.log("Teacher connected:", user.guestName);
 
+    // const roomUseId = user.roomUseId;
+    socket.join(roomUseId);
+    console.log("目前使用者Socket.room", socket.rooms);
+
+    getGuestListApi(roomUseId);
+
+    JoinRoom.to(roomUseId).emit("joinedRoom", { roomUseId });
+
+    console.log("joinedRoom emit 完成");
+
+    socket.on("disconnect", () => {
+      console.log("User disconnected");
+    });
+  });
   socket.on("joinRoom", async (token) => {
-    // console.log(token);
     const user = await verifyToken(token);
     if (user === null || !user) {
       socket.emit("error", "Invalid token");
       return;
     }
     console.log("A user connected:", user.guestName);
-    const roomUseId = user.roomUseId;
 
-    // 將 socket.id 與 token 綁定，以便斷線時使用
-    // userSockets.set(socket.id, token);
+    const roomUseId = user.roomUseId;
+    socket.join(roomUseId);
+    console.log("目前使用者Socket.room", socket.rooms);
 
     getGuestListApi(roomUseId);
 
-    socket.join(roomUseId);
-    io.to(roomUseId).emit("joinedRoom", { roomUseId });
+    JoinRoom.to(roomUseId).emit("joinedRoom", { roomUseId });
 
-    // 以上皆測試成功，從這邊開始寫推送題目的邏輯
+    console.log("joinedRoom emit 完成");
+
     socket.on("disconnect", () => {
       console.log("User disconnected");
     });
@@ -140,7 +179,6 @@ const pushQuestion = async () => {
 io.of("/Start").on("connection", (socket) => {
   console.log("A user connected");
   pushQuestion();
-
 });
 
 // // 立即推送一次題目

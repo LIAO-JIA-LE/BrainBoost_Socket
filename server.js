@@ -3,7 +3,6 @@ const http = require("http");
 const socketIo = require("socket.io");
 const cors = require("cors");
 const axios = require("axios");
-const { verify } = require("crypto");
 
 const userSockets = new Map();
 const app = express();
@@ -29,7 +28,6 @@ const io = socketIo(server, {
 app.get("/", (req, res) => {
   res.send("Server is running");
 });
-
 
 const PORT = process.env.PORT || 3001;
 const API_URL = process.env.API_URL || "http://localhost:5001/BrainBoost";
@@ -130,7 +128,7 @@ JoinRoom.on("connection", (socket) => {
     socket.join(roomUseId);
 
     getGuestListApiandEmit(roomUseId);
-    
+
     socket.on("disconnect", () => {
       console.log("Teacher disconnected");
     });
@@ -168,10 +166,11 @@ JoinRoom.on("connection", (socket) => {
 //#region 開始搶答後的socket
 
 // 獲取並推送當前房間的題目
-const pushQuestion = async (namespace,token,roomUseId) => {
+const pushQuestion = async (namespace, token, roomUseId) => {
   try {
     const response = await axios.get(
-      `${API_URL}/Room/RoomRandomQuestion?roomUseId=${roomUseId}`, {
+      `${API_URL}/Room/RoomRandomQuestion?roomUseId=${roomUseId}`,
+      {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -184,10 +183,11 @@ const pushQuestion = async (namespace,token,roomUseId) => {
   }
 };
 // 取得房間資訊
-const verifyRoom = async (token,roomUseId) => {
+const verifyRoom = async (token, roomUseId) => {
   try {
     const response = await axios.get(
-      `${API_URL}/Room/ByRoomUseId?roomUseId=${roomUseId}`, {
+      `${API_URL}/Room/ByRoomUseId?roomUseId=${roomUseId}`,
+      {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -196,28 +196,40 @@ const verifyRoom = async (token,roomUseId) => {
     const data = response.data;
     return data.data;
   } catch (error) {
-    console.error("Room verification failed:",roomUseId);
+    console.error("Room verification failed:", roomUseId);
     return null;
   }
 };
 
 // 老師開啟房間
-const TStartRoom = (token,roomUseId) => {
-  try{
-    console.log("TStartRoom payload=>",token,roomUseId);
-    const response = axios.post(`${API_URL}/Room/StartRoom`,
-      roomUseId
-      ,{
+const TStartRoom = async (token, roomUseId) => {
+  try {
+    const response = await axios.get(`${API_URL}/Room/StartRoom?roomUseId=${roomUseId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
     });
     const data = response.data;
-    console.log("TStartRoom",data);
+    console.log("TStartRoom", data);
     return data;
-  }
-  catch (error) {
+  } catch (error) {
     console.error("TStartRoom verification failed:");
+    return null;
+  }
+};
+// 老師關閉房間
+const TCloseRoom = async (token, roomUseId) => {
+  try {
+    const response = await axios.get(`${API_URL}/Room/CloseRoom?roomUseId=${roomUseId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const data = response.data;
+    console.log("TCloseRoom", data);
+    return data;
+  } catch (error) {
+    console.error("TCloseRoom verification failed:");
     return null;
   }
 };
@@ -226,101 +238,108 @@ const TStartRoom = (token,roomUseId) => {
 const StartRoom = io.of("/StartRoom");
 StartRoom.on("connection", (socket) => {
   console.log("A user connected");
-    //#region 教師加入房間
-    socket.on("TStartRoom", async (res) => {
-      // console.log("Teacher Info=>", res);
-      const token = res[0];
-      const roomUseId = res[1];
-      const user = await verifyTeacherToken(token);
-      if (user === null || !user) {
-        socket.emit("error", "Invalid token");
-        return;
-      }
-      console.log("Teacher connected:", user.userName);
-      
-      // 確認房間資訊
-      const roomInfo = await verifyRoom(token,roomUseId);
-      if (roomInfo === null || !roomInfo) {
-        socket.emit("error", "Invalid room");
-        return;
-      }
-      socket.join(roomUseId);
+  //#region 教師加入房間
+  socket.on("TStartRoom", async (res) => {
+    // console.log("Teacher Info=>", res);
+    const token = res[0];
+    const roomUseId = res[1];
+    const user = await verifyTeacherToken(token);
+    if (user === null || !user) {
+      socket.emit("error", "Invalid token");
+      return;
+    }
+    console.log("Teacher connected:", user.userName);
 
-      // 老師開始房間
-      if(TStartRoom(token,roomUseId).status_code == 400){
-        console.log("開始房間回傳",res);
-        socket.emit("error", res.message);
-      }
-      else{
-        console.log("開始房間回傳",res);
+    // 確認房間資訊
+    const roomInfo = await verifyRoom(token, roomUseId);
+    if (roomInfo === null || !roomInfo) {
+      socket.emit("error", "Invalid room");
+      return;
+    }
+    socket.join(roomUseId);
+
+    // 老師開始房間
+    // const TStartRoomres = TStartRoom(token, roomUseId);
+    TStartRoom(token, roomUseId).then((TStartRoomres) => {
+      // console.log("TStartRoomres", TStartRoomres);
+      if (TStartRoomres.status_code == 400) {
+        console.log("開始房間失敗回傳", TStartRoomres);
+        socket.emit("error", TStartRoomres.message);
+      } else {
+        console.log("開始房間成功回傳", TStartRoomres.status_code);
         // 老師開始房間後，通知所有訪客
         JoinRoom.to(roomUseId).emit("StartRoom", { roomUseId });
       }
-
-      
-      // 等待所有訪客加入後，開始推播題目
-      socket.on("GuestJoin", async (guestName) => {
-        roomPeople.push(guestName);
-        if(getGuestListApi(roomUseId).length === roomPeople.length){
-          pushQuestion(StartRoom,token,roomUseId);
-          StartRoom.to(roomUseId).emit("newQuestion", { roomUseId });
-        }
-      });
-      // pushQuestion(StartRoom,roomUseId);
-      // StartRoom.to(roomUseId).emit("Question", { roomUseId });
-  
-      // console.log("joinedRoom emit 完成");
-      // 設定一個定時推播題目的間隔
-      const intervalId = setInterval(() => {
-        pushQuestion(StartRoom,token,roomUseId);
-      }, roomInfo.timeLimit);
-  
-      socket.on("disconnect", () => {
-        if(roomPeople.length === 0){
-          clearInterval(intervalId);
-        }
-        console.log("Teacher disconnected");
-      });
     });
-    //#endregion
-  
-    //#region 訪客加入房間
-    socket.on("joinRoom", async (token) => {
-      const user = await verifyToken(token);
-      if (user === null || !user) {
+    let intervalId;
+    // 等待所有訪客加入後，開始推播題目
+    socket.on("GuestJoin", async (res) => {
+      const guest = await verifyToken(res[0]);
+      if (guest === null || !guest) {
         socket.emit("error", "Invalid token");
         return;
       }
-      console.log(user.guestName,"訪客驗證成功並加入房間");
-  
-      const roomUseId = user.roomUseId;
-      socket.join(roomUseId);
-      roomPeople.push(user.guestName);
-      // console.log("目前使用者Socket.room", socket.rooms);
-  
-      // pushQuestion(StartRoom,roomUseId);
-  
-      // StartRoom.to(roomUseId).emit("Question", { roomUseId });
-  
-      // // console.log("joinedRoom emit 完成");
-      // // 設定一個定時推播題目的間隔
-      // const intervalId = setInterval(() => {
-      //   pushQuestion(StartRoom,roomUseId);
-      // }, timeInterval);
-  
-      socket.on("disconnect", () => {
-        roomPeople = roomPeople.filter((name) => name !== user.guestName);
-        if(roomPeople.length === 0){
-          clearInterval(intervalId);
-          console.log("停止推播題目");
-        }
-        console.log("User disconnected");
-      });
+      console.log(guest.guestName, "訪客驗證成功並加入房間");
+      roomPeople.push(guest.guestName);
+      
+      if (getGuestListApi(roomUseId).length === roomPeople.length) {
+        await pushQuestion(StartRoom, token, roomUseId)
+              .then(() => {
+                console.log("設定定時推播題目");
+                // 設定一個定時推播題目的間隔
+                intervalId = setInterval(() => {
+                  pushQuestion(StartRoom,token,roomUseId);
+                }, roomInfo.timeLimit*100);
+              });
+      }
     });
+    socket.on("disconnect", () => {
+      if (intervalId) {
+        clearInterval(intervalId); // 清除定時器
+        intervalId = null; // 重置 intervalId 以防止重複清除
+      }
+      TCloseRoom(token, roomUseId);
+      console.log("Teacher disconnected");
+    });
+  });
+  //#endregion
+
+  //#region 訪客加入房間
+  socket.on("joinRoom", async (token) => {
+    const user = await verifyToken(token);
+    if (user === null || !user) {
+      socket.emit("error", "Invalid token");
+      return;
+    }
+    console.log(user.guestName, "訪客驗證成功並加入房間");
+
+    const roomUseId = user.roomUseId;
+    socket.join(roomUseId);
+    roomPeople.push(user.guestName);
+    // console.log("目前使用者Socket.room", socket.rooms);
+
+    // pushQuestion(StartRoom,roomUseId);
+
+    // StartRoom.to(roomUseId).emit("Question", { roomUseId });
+
+    // // console.log("joinedRoom emit 完成");
+    // // 設定一個定時推播題目的間隔
+    // const intervalId = setInterval(() => {
+    //   pushQuestion(StartRoom,roomUseId);
+    // }, timeInterval);
+
+    socket.on("disconnect", () => {
+      roomPeople = roomPeople.filter((name) => name !== user.guestName);
+      if (roomPeople.length === 0) {
+        clearInterval(intervalId);
+        console.log("停止推播題目");
+      }
+      console.log("User disconnected");
+    });
+  });
   //#endregion
 });
 //#endregion
-
 
 // // 獲取該房間的時間限制並定時推送新題目
 // const timeLimitResponse = await axios.get(

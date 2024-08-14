@@ -104,7 +104,7 @@ const verifyTeacherToken = async (token) => {
     // console.log("老師資訊", data.data.userName);
     return data.data;
   } catch (error) {
-    console.error("Teacher Token verification failed:");
+    console.error("Teacher Token verification failed:",error.message);
     return null;
   }
 };
@@ -179,7 +179,7 @@ const pushQuestion = async (namespace, token, roomUseId) => {
       }
     );
     const question = response.data;
-    console.log("推播題目", question.data);
+    console.log("pushQuestion_推播題目", question.data);
     if(question.data == null){
       return null;
     }
@@ -294,9 +294,9 @@ StartRoom.on("connection", (socket) => {
 
     // 老師開始房間
     const TStartRoomres = await TStartRoom(token, roomUseId);
-    if (TStartRoomres.status_code == 400) {
+    if (TStartRoomres == null || TStartRoomres.status_code == 400) {
       console.log("開始房間失敗回傳", TStartRoomres);
-      socket.emit("error", TStartRoomres.message);
+      socket.emit("error", "開始房間失敗回傳");
     } else {
       console.log("開始房間成功回傳", TStartRoomres.status_code);
       
@@ -329,6 +329,7 @@ StartRoom.on("connection", (socket) => {
   // 等待所有訪客加入後，開始推播題目
   socket.on("joinRoom", async (res) => {
     try {
+      console.log("訪客加入帶的資料=>", res);
       const guest = await verifyToken(res[0]);
       if (guest === null || !guest) {
         socket.emit("error", "Invalid token");
@@ -350,31 +351,33 @@ StartRoom.on("connection", (socket) => {
       // StartRoom.to(roomUseId).emit("GuestListResponse", roomData.roomPeople);
       console.log(guest.guestName, "訪客驗證成功並加入房間");
 
+      socket.join(roomUseId);
       // 取得資料庫房間的訪客列表
-      const GuestList = await getGuestListApi(res[1]);
+      const GuestList = await getGuestListApi(roomUseId);
       console.log("GuestList=>", GuestList);
 
       // 等待所有訪客加入後，開始推播題目
       if (GuestList.length === roomData.roomPeople.length) {
-        console.log("首次推播題目");
-        const roomInfo = await verifyRoom(res[0], res[1]);
+        const roomInfo = await verifyRoom(res[0], roomUseId);
         try {
-          await pushQuestion(StartRoom, res[0], res[1]);
+          console.log("首次推播題目");
+          await pushQuestion(StartRoom, res[0], roomUseId);
           console.log("推播題目成功,設定定時推播題目 roomInfo.timeLimit=>", roomInfo.timeLimit);
           // 設定一個定時推播題目的間隔
           roomData.intervalId = setInterval( async () => {
             console.log("推播題目");
             try {
-              const result = await pushQuestion(StartRoom, res[0], res[1]);
-      
+              const result = await pushQuestion(StartRoom, res[0], roomUseId);
+              console.log("result=>", result);
               if (result === null) {
                 console.log("停止推播題目");
                 clearInterval(roomData.intervalId); // 停止計時器
-                StartRoom.to(res[1]).emit("end"); // 通知房間結束
+                StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
               }
             } catch (error) {
               console.error("Failed to push question in interval:", error);
               clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
+              StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
             }
           }, roomInfo.timeLimit * 1000); // 确保乘以 1000
         } catch (error) {

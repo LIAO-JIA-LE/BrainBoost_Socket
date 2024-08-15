@@ -197,6 +197,26 @@ const pushQuestion = async (namespace, token, roomUseId) => {
     console.error("Error fetching question:", error);
   }
 };
+
+// 推撥分數
+const pushScore = async (namespace, token, roomUseId) => {
+  try {
+    const response = await axios.get(
+      `${API_URL}/Room/RoomScore?roomUseId=${roomUseId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    const score = response.data;
+    namespace.to(roomUseId).emit("Score", score.data);
+  }
+  catch(error){
+    console.error("Error fetching score:", error);
+  }
+};
+
 // 取得房間資訊
 const verifyRoom = async (token, roomUseId) => {
   try {
@@ -380,8 +400,14 @@ StartRoom.on("connection", (socket) => {
           roomData.intervalId = setInterval( async () => {
             console.log("推播題目");
             try {
+
+              // 先推撥目前搶答是分數排名
+              await pushScore(StartRoom, roomData.token, roomUseId);
+
+              // 再推撥題目
               const result = await pushQuestion(StartRoom, res[0], roomUseId);
-              console.log("result=>", result);
+              // console.log("result=>", result);
+
               if (result === null) {
                 console.log("停止推播題目");
                 clearInterval(roomData.intervalId); // 停止計時器

@@ -183,7 +183,16 @@ const pushQuestion = async (namespace, token, roomUseId) => {
     if(question.data == null){
       return null;
     }
-    namespace.to(roomUseId).emit("newQuestion", question.data);
+    const roomdata = RoomData.get(roomUseId);
+    namespace.to(roomUseId).emit("newQuestion", 
+      {
+        QuestionData:question.data,
+        RoomInfo:{
+          roomId:roomdata.roomId,
+          timeLimit:roomdata.timeLimit
+        }
+      }
+    );
   } catch (error) {
     console.error("Error fetching question:", error);
   }
@@ -290,13 +299,17 @@ StartRoom.on("connection", (socket) => {
       socket.emit("error", "Invalid room");
       return;
     }
+    // 儲存房間資訊
+    roomData.timeLimit = roomInfo.timeLimit;
+    roomData.roomId = roomInfo.roomId;
     socket.join(roomUseId);
 
     // 老師開始房間
     const TStartRoomres = await TStartRoom(token, roomUseId);
     if (TStartRoomres == null || TStartRoomres.status_code == 400) {
       console.log("開始房間失敗回傳", TStartRoomres);
-      socket.emit("error", "開始房間失敗回傳");
+      RoomData.delete(roomUseId);
+      socket.emit("error", "開始房間失敗");
     } else {
       console.log("開始房間成功回傳", TStartRoomres.status_code);
       
@@ -349,9 +362,9 @@ StartRoom.on("connection", (socket) => {
       roomData.roomPeople.push(guest.guestName);
       console.log("roomData.roomPeople=>", roomData.roomPeople);
       // StartRoom.to(roomUseId).emit("GuestListResponse", roomData.roomPeople);
+      socket.join(roomUseId);
       console.log(guest.guestName, "訪客驗證成功並加入房間");
 
-      socket.join(roomUseId);
       // 取得資料庫房間的訪客列表
       const GuestList = await getGuestListApi(roomUseId);
       console.log("GuestList=>", GuestList);
@@ -399,6 +412,7 @@ StartRoom.on("connection", (socket) => {
         console.log("User disconnected");
       });
     } catch (error) {
+      RoomData.delete(roomUseId);
       socket.emit("error", error);
     }
   });

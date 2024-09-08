@@ -397,7 +397,7 @@ JoinRoom.on("connection", (socket) => {
           const roomInfo = await verifyRoom(res[0], roomUseId);
           try {
             console.log("首次推播題目");
-            await pushQuestion(StartRoom, res[0], roomUseId);
+            setTimeout(async()=>{await pushQuestion(StartRoom, res[0], roomUseId);},5000);
             console.log("推播題目成功,設定定時推播題目 roomInfo.timeLimit=>", roomInfo.timeLimit);
             // 設定一個定時推播題目的間隔
             roomData.intervalId = setInterval( async () => {
@@ -423,8 +423,9 @@ JoinRoom.on("connection", (socket) => {
                 clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
                 StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
               }
-            }, roomInfo.timeLimit * 1000); // 确保乘以 1000
+            }, (roomInfo.timeLimit + 5) * 1000); // 确保乘以 1000
           } catch (error) {
+            clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
             console.error("Failed to push the first question:", error);
           }
         }

@@ -17,11 +17,7 @@ const server = http.createServer(app);
 //#region socket.io設定(cros)
 const io = socketIo(server, {
   cors: {
-    origin: [
-      "http://localhost:3000",
-      "http://localhost:8000",
-      "http://localhost:8001",
-    ],
+    origin: '*',
     methods: ["GET", "POST"],
   },
 });

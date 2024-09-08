@@ -272,6 +272,9 @@ JoinRoom.on("connection", (socket) => {
       return null;
     }
   };
+  function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
   //#endregion
 
   //#region 正式搶答房間
@@ -393,7 +396,9 @@ JoinRoom.on("connection", (socket) => {
           const roomInfo = await verifyRoom(res[0], roomUseId);
           try {
             console.log("首次推播題目");
-            setTimeout(async()=>{await pushQuestion(StartRoom, res[0], roomUseId);},5000);
+            await delay(5000);
+            // setTimeout(async()=>{await pushQuestion(StartRoom, res[0], roomUseId);},5000);
+            await pushQuestion(StartRoom, res[0], roomUseId);
             console.log("推播題目成功,設定定時推播題目 roomInfo.timeLimit=>", roomInfo.timeLimit);
             // 設定一個定時推播題目的間隔
             roomData.intervalId = setInterval( async () => {

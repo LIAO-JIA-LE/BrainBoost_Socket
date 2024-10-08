@@ -185,6 +185,7 @@ JoinRoom.on("connection", (socket) => {
         {
           QuestionData:question.data,
           RoomInfo:{
+            roomName:roomdata.roomName,
             roomId:roomdata.roomId,
             timeLimit:roomdata.timeLimit
           }
@@ -322,6 +323,7 @@ JoinRoom.on("connection", (socket) => {
         return;
       }
       // 儲存房間資訊
+      roomData.roomName = roomInfo.roomName;
       roomData.timeLimit = roomInfo.timeLimit;
       roomData.roomId = roomInfo.roomId;
       socket.join(roomUseId);

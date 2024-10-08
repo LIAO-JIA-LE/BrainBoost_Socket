@@ -185,6 +185,7 @@ JoinRoom.on("connection", (socket) => {
         {
           QuestionData:question.data,
           RoomInfo:{
+            roomName:roomdata.roomName,
             roomId:roomdata.roomId,
             roomName:roomdata.roomName,
             timeLimit:roomdata.timeLimit

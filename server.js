@@ -427,7 +427,7 @@ JoinRoom.on("connection", (socket) => {
                 clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
                 StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
               }
-            }, (roomData.timeLimit) * 1000); // 确保乘以 1000
+            }, ( roomData.timeLimit + 5 ) * 1000); // 确保乘以 1000
           } catch (error) {
             clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
             console.error("Failed to push the first question:", error);

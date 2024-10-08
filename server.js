@@ -27,7 +27,7 @@ app.get("/", (req, res) => {
   res.send("Server is running");
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.APP_PORT || 3001;
 const API_URL = process.env.API_URL || "http://localhost:5001/BrainBoost";
 
 //#region 取得訪客列表
@@ -360,7 +360,7 @@ JoinRoom.on("connection", (socket) => {
       });
     });
     //#endregion
-
+    //#region 訪客加入房間
     // 等待所有訪客加入後，開始推播題目
     socket.on("joinRoom", async (res) => {
       try {
@@ -391,14 +391,14 @@ JoinRoom.on("connection", (socket) => {
         const GuestList = await getGuestListApi(roomUseId);
         console.log("GuestList=>", GuestList);
 
-        // 等待所有訪客加入後，開始推播題目
+        //#region 等待所有訪客加入後，開始推播題目
         if (GuestList.length === roomData.roomPeople.length) {
           const roomInfo = await verifyRoom(res[0], roomUseId);
           try {
             console.log("首次推播題目");
-            await delay(5000);
-            // setTimeout(async()=>{await pushQuestion(StartRoom, res[0], roomUseId);},5000);
-            await pushQuestion(StartRoom, res[0], roomUseId);
+            setTimeout(async()=>{await pushQuestion(StartRoom, res[0], roomUseId);},5000);
+            // await delay(5000);
+            // await pushQuestion(StartRoom, res[0], roomUseId);
             console.log("推播題目成功,設定定時推播題目 roomInfo.timeLimit=>", roomInfo.timeLimit);
             // 設定一個定時推播題目的間隔
             roomData.intervalId = setInterval( async () => {
@@ -430,7 +430,7 @@ JoinRoom.on("connection", (socket) => {
             console.error("Failed to push the first question:", error);
           }
         }
-
+        //#endregion
         socket.on("disconnect", () => {
           const guest = verifyToken(res[0]);
           if (guest === null || !guest) {
@@ -449,7 +449,7 @@ JoinRoom.on("connection", (socket) => {
         socket.emit("error", error);
       }
     });
-
+    //#endregion
     //#region 訪客加入房間
     // socket.on("joinRoom", async (res) => {
     //   const user = await verifyToken(res[0]);

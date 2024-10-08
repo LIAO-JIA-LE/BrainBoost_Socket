@@ -186,6 +186,7 @@ JoinRoom.on("connection", (socket) => {
           QuestionData:question.data,
           RoomInfo:{
             roomId:roomdata.roomId,
+            roomName:roomdata.roomName,
             timeLimit:roomdata.timeLimit
           }
         }
@@ -291,8 +292,8 @@ JoinRoom.on("connection", (socket) => {
         // 將房間資料存入總房間資料(RoomData)
         RoomData.set(roomUseId,{
           roomUseId:roomUseId,
-          token:res[0], 
-          roomPeople:[], 
+          token:res[0],
+          roomPeople:[],
           intervalId:null
         });
         roomData = RoomData.get(roomUseId);
@@ -322,6 +323,7 @@ JoinRoom.on("connection", (socket) => {
         return;
       }
       // 儲存房間資訊
+      roomData.roomName = roomInfo.roomName;
       roomData.timeLimit = roomInfo.timeLimit;
       roomData.roomId = roomInfo.roomId;
       socket.join(roomUseId);
@@ -393,16 +395,16 @@ JoinRoom.on("connection", (socket) => {
 
         // 等待所有訪客加入後，開始推播題目
         if (GuestList.length === roomData.roomPeople.length) {
-          const roomInfo = await verifyRoom(res[0], roomUseId);
+          // const roomInfo = await verifyRoom(res[0], roomUseId);
           try {
-            console.log("首次推播題目");
+            // console.log("首次推播題目");
             await delay(5000);
-            // setTimeout(async()=>{await pushQuestion(StartRoom, res[0], roomUseId);},5000);
+
             await pushQuestion(StartRoom, res[0], roomUseId);
-            console.log("推播題目成功,設定定時推播題目 roomInfo.timeLimit=>", roomInfo.timeLimit);
+            // console.log("推播題目成功,設定定時推播題目 roomInfo.timeLimit=>", roomInfo.timeLimit);
             // 設定一個定時推播題目的間隔
             roomData.intervalId = setInterval( async () => {
-              console.log("推播題目");
+              // console.log("推播題目");
               try {
 
                 // 先推撥目前搶答是分數排名
@@ -419,12 +421,13 @@ JoinRoom.on("connection", (socket) => {
                     StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
                   }
                 }, 5000);
+
               } catch (error) {
                 console.error("Failed to push question in interval:", error);
                 clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
                 StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
               }
-            }, (roomInfo.timeLimit + 5) * 1000); // 确保乘以 1000
+            }, (roomData.timeLimit) * 1000); // 确保乘以 1000
           } catch (error) {
             clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
             console.error("Failed to push the first question:", error);

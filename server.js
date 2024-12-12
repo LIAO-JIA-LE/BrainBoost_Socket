@@ -4,11 +4,9 @@ const socketIo = require("socket.io");
 const cors = require("cors");
 const axios = require("axios");
 
-const userSockets = new Map();
 const app = express();
 app.use(cors());
 
-let QuestionData = {};
 let roomPeople = [];
 
 const RoomData = new Map();
@@ -276,13 +274,18 @@ JoinRoom.on("connection", (socket) => {
   function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
+  // 取得當前時間
+  const getTimeStamp = () => {
+    const now = new Date();
+    return now.toISOString(); // ISO格式時間
+  };
   //#endregion
 
   //#region 正式搶答房間
   const StartRoom = io.of("/StartRoom");
   StartRoom.on("connection", (socket) => {
     let intervalId;
-    console.log("A user connected");
+
     //#region 教師加入房間
     socket.on("TStartRoom", async (res) => {
       const roomUseId = res[1];
@@ -290,11 +293,11 @@ JoinRoom.on("connection", (socket) => {
       let roomData = RoomData.get(roomUseId);
       if(roomData === undefined){
         // 將房間資料存入總房間資料(RoomData)
-        RoomData.set(roomUseId,{
-          roomUseId:roomUseId,
-          token:res[0],
-          roomPeople:[],
-          intervalId:null
+        RoomData.set(roomUseId, {
+          roomUseId: roomUseId,
+          token: res[0],
+          roomPeople: [],
+          intervalId: null,
         });
         roomData = RoomData.get(roomUseId);
       }
@@ -309,12 +312,14 @@ JoinRoom.on("connection", (socket) => {
 
       const token = roomData.token;
       
+      // 驗證老師Token
       const user = await verifyTeacherToken(token);
       if (user === null || !user) {
         socket.emit("error", "Invalid token");
         return;
       }
-      console.log("Teacher connected:", user.userName);
+      // 加上時間戳記
+      console.log(`[${getTimeStamp()}]Teacher connected:`, user.userName);
 
       // 確認房間資訊
       const roomInfo = await verifyRoom(token, roomUseId);
@@ -418,6 +423,7 @@ JoinRoom.on("connection", (socket) => {
                     console.log("停止推播題目");
                     clearInterval(roomData.intervalId); // 停止計時器
                     StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
+                    RoomData.delete(roomUseId);
                   }
                 }, 5000);
 
@@ -425,6 +431,7 @@ JoinRoom.on("connection", (socket) => {
                 console.error("Failed to push question in interval:", error);
                 clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
                 StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
+                RoomData.delete(roomUseId);
               }
             }, ( roomData.timeLimit + 5 ) * 1000); // 确保乘以 1000
           } catch (error) {

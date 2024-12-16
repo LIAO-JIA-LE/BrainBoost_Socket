@@ -7,8 +7,6 @@ const axios = require("axios");
 const app = express();
 app.use(cors());
 
-let roomPeople = [];
-
 const RoomData = new Map();
 
 const server = http.createServer(app);
@@ -26,27 +24,39 @@ app.get("/", (req, res) => {
 });
 
 const PORT = process.env.APP_PORT || 3001;
-const API_URL = process.env.API_URL || "http://localhost:5001/BrainBoost";
+const API_URL = process.env.API_URL || "http://localhost:5000/BrainBoost";
 
 //#region 取得訪客列表
 const getGuestListApiandEmit = async (roomUseId) => {
-  try {
-    // console.log("=========進入取得訪客列表Function=========");
-    const response = await axios.get(
-      `${API_URL}/Guest/GuestList?roomUseId=${roomUseId}`
-    );
-    const data = response.data;
-    // console.log("Data from getGuestListApi:", data.data.guestNameList);
-
-    // 廣播給所有房間中的用戶
-    JoinRoom.to(roomUseId).emit("GuestListResponse", data.data.guestNameList);
-    // console.log("=========function執行完成=========");
-  } catch (error) {
-    console.error(
-      `Error fetching data from ${API_URL}/Guest/GuestList?roomUseId=${roomUseId}:`,
-      error
-    );
+  
+  // 從房間資料取得等待人員名單
+  const roomData = RoomData.get(roomUseId);
+  if(roomData === undefined){
+    return;
   }
+  const data = { data: { guestNameList: roomData.waitPeople } };
+  
+  JoinRoom.to(roomUseId).emit("GuestListResponse", data.data.guestNameList);
+  
+  console.log(`Data from RoomUseId:${roomUseId} RoomData:`, roomData);
+  
+  // try {
+  //   // console.log("=========進入取得訪客列表Function=========");
+  //   // const response = await axios.get(
+  //   //   `${API_URL}/Guest/GuestList?roomUseId=${roomUseId}`
+  //   // );
+  //   // const data = response.data;
+  //   // console.log("Data from getGuestListApi:", data.data.guestNameList);
+
+  //   // 廣播給所有房間中的用戶
+  //   JoinRoom.to(roomUseId).emit("GuestListResponse", data.data.guestNameList);
+  //   // console.log("=========function執行完成=========");
+  // } catch (error) {
+  //   console.error(
+  //     `Error fetching data from ${API_URL}/Guest/GuestList?roomUseId=${roomUseId}:`,
+  //     error
+  //   );
+  // }
 };
 const getGuestListApi = async (roomUseId) => {
   try {
@@ -107,13 +117,39 @@ const verifyTeacherToken = async (token) => {
 //#region 等待室
 const JoinRoom = io.of("/JoinRoom");
 JoinRoom.on("connection", (socket) => {
-  console.log("A User connected");
 
   //#region 教師加入房間
   socket.on("TjoinRoom", async (res) => {
     // console.log("Teacher Info=>", res);
     const token = res[0];
+    
+    // 根據roomUseId初始化房間資料
     const roomUseId = res[1];
+    let roomData = RoomData.get(roomUseId);
+    if(roomData === undefined){
+      // 將房間資料存入總房間資料(RoomData)
+      RoomData.set(roomUseId, {
+        roomUseId: roomUseId,
+        token: res[0],
+        waitPeople: [],
+        roomPeople: [],
+        intervalId: null,
+      });
+      roomData = RoomData.get(roomUseId);
+    }
+    else{
+      roomData.roomUseId = roomUseId;
+      roomData.token = token;
+      roomData.waitPeople = [];
+      roomData.roomPeople = [];
+      roomData.intervalId = null;
+    }
+    if (roomData.intervalId) {
+      console.log("清除定時器");
+      clearInterval(roomData.intervalId); // 清除定時器
+      roomData.intervalId = null; // 重置 intervalId 以防止重複清除
+    }
+
     const user = await verifyTeacherToken(token);
     if (user === null || !user) {
       socket.emit("error", "Invalid token");
@@ -126,6 +162,8 @@ JoinRoom.on("connection", (socket) => {
     getGuestListApiandEmit(roomUseId);
 
     socket.on("disconnect", () => {
+      // 刪除房間資料
+      RoomData.delete(roomUseId);
       console.log("Teacher disconnected");
     });
   });
@@ -138,21 +176,32 @@ JoinRoom.on("connection", (socket) => {
       socket.emit("error", "Invalid token");
       return;
     }
-    console.log("A guest connected:", user.guestName);
+    console.log(`[${getTimeStamp()}]${user.guestName} connected`);
 
     const roomUseId = user.roomUseId;
     socket.join(roomUseId);
     // console.log("目前使用者Socket.room", socket.rooms);
 
-    getGuestListApiandEmit(roomUseId);
+    // 將訪客資料放入房間等待人員名單
+    const roomData = RoomData.get(roomUseId);
+    // 判斷是否有房間資料，若無則emit錯誤
+    if(roomData === undefined){
+      console.log(`[${getTimeStamp()}]房間未開啟 RoomUseId:${roomUseId}`);
+      socket.emit("error", "房間未開啟");
+      return;
+    }
+    roomData.waitPeople.push(user.guestName);
+
+    await getGuestListApiandEmit(roomUseId);
 
     JoinRoom.to(roomUseId).emit("joinedRoom", { roomUseId });
 
-    // console.log("joinedRoom emit 完成");
-
-    socket.on("disconnect", () => {
-      getGuestListApiandEmit(roomUseId);
-      console.log("guest disconnected");
+    socket.on("disconnect", async () => {
+      // 將使用者從房間等待人員名單中移除
+      roomData.waitPeople = roomData.waitPeople.filter((name) => name !== user.guestName);
+      // 推播等待人員名單
+      await getGuestListApiandEmit(roomUseId);
+      console.log(`[${getTimeStamp()}]${user.guestName} disconnected`);
     });
   });
   //#endregion
@@ -174,7 +223,7 @@ JoinRoom.on("connection", (socket) => {
         }
       );
       const question = response.data;
-      console.log("pushQuestion_推播題目", question.data);
+      // console.log("pushQuestion_推播題目", question.data);
       if(question.data == null){
         return null;
       }
@@ -190,7 +239,7 @@ JoinRoom.on("connection", (socket) => {
         }
       );
     } catch (error) {
-      console.error("Error fetching question:", error);
+      console.error(`[${getTimeStamp()}]Error fetching question:${error}`, );
     }
   };
 
@@ -206,11 +255,11 @@ JoinRoom.on("connection", (socket) => {
         }
       );
       const score = response.data;
-      console.log("ScoreBoard_推播分數", score.data);
+      // console.log("ScoreBoard_推播分數", score.data);
       namespace.to(roomUseId).emit("Score", score.data);
     }
     catch(error){
-      console.error("Error fetching score:", error);
+      console.error(`[${getTimeStamp()}]Error fetching score:${error}`);
     }
   };
 
@@ -228,7 +277,7 @@ JoinRoom.on("connection", (socket) => {
       const data = response.data;
       return data.data;
     } catch (error) {
-      console.error("Room verification failed:", roomUseId);
+      console.error(`[${getTimeStamp()}]Room verification failed:${roomUseId}`, );
       return null;
     }
   };
@@ -236,6 +285,7 @@ JoinRoom.on("connection", (socket) => {
   // 老師開啟房間
   const TStartRoom = async (token, roomUseId) => {
     try {
+      // console.log("token:",token,"roomUseId:", roomUseId);
       const response = await axios.get(
         `${API_URL}/Room/StartRoom?roomUseId=${roomUseId}`,
         {
@@ -245,10 +295,11 @@ JoinRoom.on("connection", (socket) => {
         }
       );
       const data = response.data;
-      console.log("已開啟房間");
+      // 成功開啟房間加上時間戳記
+      console.log(`[${getTimeStamp()}]Room Start Success:${data}`);
       return data;
     } catch (error) {
-      console.error("TStartRoom verification failed:");
+      console.error(`[${getTimeStamp()}]TStartRoom verification failed:${error.response.data}`);
       return null;
     }
   };
@@ -267,13 +318,11 @@ JoinRoom.on("connection", (socket) => {
       console.log("已關閉房間");
       return data;
     } catch (error) {
-      console.error("TCloseRoom verification failed:");
+      console.error(`[${getTimeStamp()}]TCloseRoom verification failed:${error.response.data}`);
       return null;
     }
   };
-  function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
+  
   // 取得當前時間
   const getTimeStamp = () => {
     const now = new Date();
@@ -285,17 +334,19 @@ JoinRoom.on("connection", (socket) => {
   const StartRoom = io.of("/StartRoom");
   StartRoom.on("connection", (socket) => {
     let intervalId;
-
+    let token;
     //#region 教師加入房間
     socket.on("TStartRoom", async (res) => {
+      
+      // 根據roomUseId初始化房間資料
       const roomUseId = res[1];
-      // 初始化房間資料
       let roomData = RoomData.get(roomUseId);
       if(roomData === undefined){
         // 將房間資料存入總房間資料(RoomData)
         RoomData.set(roomUseId, {
           roomUseId: roomUseId,
           token: res[0],
+          waitPeople: [],
           roomPeople: [],
           intervalId: null,
         });
@@ -309,8 +360,7 @@ JoinRoom.on("connection", (socket) => {
         clearInterval(roomData.intervalId); // 清除定時器
         roomData.intervalId = null; // 重置 intervalId 以防止重複清除
       }
-
-      const token = roomData.token;
+      token = roomData.token;
       
       // 驗證老師Token
       const user = await verifyTeacherToken(token);
@@ -319,7 +369,7 @@ JoinRoom.on("connection", (socket) => {
         return;
       }
       // 加上時間戳記
-      console.log(`[${getTimeStamp()}]Teacher connected:`, user.userName);
+      console.log(`[${getTimeStamp()}]Teacher StartRoom:`, user.userName);
 
       // 確認房間資訊
       const roomInfo = await verifyRoom(token, roomUseId);
@@ -332,46 +382,33 @@ JoinRoom.on("connection", (socket) => {
       roomData.timeLimit = roomInfo.timeLimit;
       roomData.roomId = roomInfo.roomId;
       socket.join(roomUseId);
-
-      // 老師開始房間
-      const TStartRoomres = await TStartRoom(token, roomUseId);
-      if (TStartRoomres == null || TStartRoomres.status_code == 400) {
-        console.log("開始房間失敗回傳", TStartRoomres);
-        RoomData.delete(roomUseId);
-        socket.emit("error", "開始房間失敗");
-      } else {
-        console.log("開始房間成功回傳", TStartRoomres.status_code);
-        
-        // 初始化房間人數
-        roomPeople = [];
-        // roomData.roomPeople = [];
-
-        // 老師開始房間後，通知所有訪客
-        JoinRoom.to(roomUseId).emit("StartRoom", { roomUseId });
-      }
+      JoinRoom.to(roomUseId).emit("StartRoom", { roomUseId });
+    
 
       socket.on("disconnect", () => {
         TCloseRoom(token, roomUseId);
         if (intervalId) {
-          console.log('清除定時器');
+          // console.log('清除定時器');
           clearInterval(intervalId); // 清除定時器
           intervalId = null; // 重置 intervalId 以防止重複清除
         }
         if (roomData.intervalId) {
-          console.log('清除roomData中的定時器');
+          // console.log('清除roomData中的定時器');
           clearInterval(roomData.intervalId); // 清除定時器
           roomData.intervalId = null; // 重置 intervalId 以防止重複清除
         }
-        // 更新搶答室狀態值些emit事件給前端戳後端API
-        console.log("Teacher disconnected");
+        // 加上時間戳記
+        console.log(`[${getTimeStamp()}]Teacher disconnected:`, user.userName);
+
       });
     });
-    //#endregion
-    //#region 訪客加入房間
+    // #endregion
+    // #region 訪客加入房間
     // 等待所有訪客加入後，開始推播題目
     socket.on("joinRoom", async (res) => {
       try {
-        console.log("訪客加入帶的資料=>", res);
+        // 訪客加入帶的資料加上時間戳記
+        console.log(`[${getTimeStamp()}]Guest connected:`, res[1]);
         const guest = await verifyToken(res[0]);
         if (guest === null || !guest) {
           socket.emit("error", "Invalid token");
@@ -389,10 +426,10 @@ JoinRoom.on("connection", (socket) => {
     
         // 紀錄人數
         roomData.roomPeople.push(guest.guestName);
-        console.log("roomData.roomPeople=>", roomData.roomPeople);
+        // console.log("roomData.roomPeople=>", roomData.roomPeople);
         // StartRoom.to(roomUseId).emit("GuestListResponse", roomData.roomPeople);
         socket.join(roomUseId);
-        console.log(guest.guestName, "訪客驗證成功並加入房間");
+        // console.log(guest.guestName, "訪客驗證成功並加入房間");
 
         // 取得資料庫房間的訪客列表
         const GuestList = await getGuestListApi(roomUseId);
@@ -400,12 +437,32 @@ JoinRoom.on("connection", (socket) => {
 
         //#region 等待所有訪客加入後，開始推播題目
         if (GuestList.length === roomData.roomPeople.length) {
+
+          // console.log("所有訪客已加入");
+          // 等待所有訪客加入後，開始推播題目
+          const TStartRoomres = await TStartRoom(roomData.token, roomUseId);
+          if (TStartRoomres == null || TStartRoomres.status_code == 400) {
+            // console.log("開始房間失敗回傳", TStartRoomres);
+            RoomData.delete(roomUseId);
+            socket.emit("error", "開始房間失敗");
+          } 
+          // else {
+          //   console.log("開始房間成功回傳", TStartRoomres.status_code);
+            
+            // 初始化房間人數
+            // roomPeople = [];
+            // roomData.roomPeople = [];
+
+            // 老師開始房間後，通知所有訪客
+            // JoinRoom.to(roomUseId).emit("StartRoom", { roomUseId });
+          // }
+
           // const roomInfo = await verifyRoom(res[0], roomUseId);
           try {
-            console.log("首次推播題目");
+            // console.log("首次推播題目");
             setTimeout(async()=>{await pushQuestion(StartRoom, res[0], roomUseId);},5000);
 
-            console.log("推播題目成功,設定定時推播題目 roomInfo.timeLimit=>", roomInfo.timeLimit);
+            // console.log("推播題目成功,設定定時推播題目 roomInfo.timeLimit=>", roomData.timeLimit);
             // 設定一個定時推播題目的間隔
             roomData.intervalId = setInterval( async () => {
               // console.log("推播題目");
@@ -420,7 +477,7 @@ JoinRoom.on("connection", (socket) => {
                   // console.log("result=>", result);
   
                   if (result === null) {
-                    console.log("停止推播題目");
+                    // console.log("停止推播題目");
                     clearInterval(roomData.intervalId); // 停止計時器
                     StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
                     RoomData.delete(roomUseId);
@@ -428,7 +485,7 @@ JoinRoom.on("connection", (socket) => {
                 }, 5000);
 
               } catch (error) {
-                console.error("Failed to push question in interval:", error);
+                // console.error("Failed to push question in interval:", error);
                 clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
                 StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
                 RoomData.delete(roomUseId);
@@ -436,7 +493,7 @@ JoinRoom.on("connection", (socket) => {
             }, ( roomData.timeLimit + 5 ) * 1000); // 确保乘以 1000
           } catch (error) {
             clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
-            console.error("Failed to push the first question:", error);
+            // console.error("Failed to push the first question:", error);
           }
         }
         //#endregion
@@ -447,52 +504,16 @@ JoinRoom.on("connection", (socket) => {
             return;
           }
           roomData.roomPeople = roomData.roomPeople.filter((name) => name !== guest.guestName);
-          if (roomPeople.length === 0) {
+          if (roomData.roomPeople.length === 0) {
             clearInterval(roomData.intervalId);
             console.log("停止推播題目");
           }
           console.log("User disconnected");
         });
       } catch (error) {
-        RoomData.delete(roomUseId);
         socket.emit("error", error);
       }
     });
-    //#endregion
-    //#region 訪客加入房間
-    // socket.on("joinRoom", async (res) => {
-    //   const user = await verifyToken(res[0]);
-    //   if (user === null || !user) {
-    //     socket.emit("error", "Invalid token");
-    //     return;
-    //   }
-    //   console.log(user.guestName, "訪客驗證成功並加入房間");
-
-    //   const roomUseId = user.roomUseId;
-    //   socket.join(roomUseId);
-    //   roomPeople.push(user.guestName);
-    //   // console.log("目前使用者Socket.room", socket.rooms);
-
-    //   // pushQuestion(StartRoom,roomUseId);
-
-    //   // StartRoom.to(roomUseId).emit("Question", { roomUseId });
-
-    //   // // console.log("joinedRoom emit 完成");
-    //   // // 設定一個定時推播題目的間隔
-    //   // const intervalId = setInterval(() => {
-    //   //   pushQuestion(StartRoom,roomUseId);
-    //   // }, timeInterval);
-
-    //   socket.on("disconnect", () => {
-    //     roomPeople = roomPeople.filter((name) => name !== user.guestName);
-    //     if (roomPeople.length === 0) {
-    //       clearInterval(intervalId);
-    //       console.log("停止推播題目");
-    //     }
-    //     console.log("User disconnected");
-    //   });
-    // });
-    //#endregion
   });
   //#endregion
 

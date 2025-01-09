@@ -24,7 +24,7 @@ app.get("/", (req, res) => {
 });
 
 const PORT = process.env.APP_PORT || 3001;
-const API_URL = process.env.API_URL || "http://localhost:5000/BrainBoost";
+const API_URL = process.env.API_URL || "https://brainboost.backend.newfields.com.tw/BrainBoost";
 
 //#region 取得訪客列表
 const getGuestListApiandEmit = async (roomUseId) => {
@@ -98,7 +98,7 @@ const verifyToken = async (token) => {
 //#region 教師驗證
 const verifyTeacherToken = async (token) => {
   try {
-    // console.log("Teacher Token=>", token);
+    // console.log(`${API_URL + "/User/MySelf"} Teacher Token=>`, token);
     const response = await axios.get(`${API_URL}/User/MySelf`, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -108,7 +108,7 @@ const verifyTeacherToken = async (token) => {
     // console.log("老師資訊", data.data.userName);
     return data.data;
   } catch (error) {
-    console.error("Teacher Token verification failed:",error.message);
+    console.error(`[${getTimeStamp()}]Teacher Token verification failed:${error.message}`);
     return null;
   }
 };
@@ -176,7 +176,7 @@ JoinRoom.on("connection", (socket) => {
       socket.emit("error", "Invalid token");
       return;
     }
-    console.log(`[${getTimeStamp()}]${user.guestName} connected`);
+    console.log(`[${getTimeStamp()}]${user.guestName} connected /JoinRoom/joinRoom`);
 
     const roomUseId = user.roomUseId;
     socket.join(roomUseId);
@@ -190,6 +190,8 @@ JoinRoom.on("connection", (socket) => {
       socket.emit("error", "房間未開啟");
       return;
     }
+    // 紀錄人數
+    roomData.roomPeople.push(guest.guestName);
     roomData.waitPeople.push(user.guestName);
 
     await getGuestListApiandEmit(roomUseId);
@@ -408,12 +410,12 @@ JoinRoom.on("connection", (socket) => {
     socket.on("joinRoom", async (res) => {
       try {
         // 訪客加入帶的資料加上時間戳記
-        console.log(`[${getTimeStamp()}]Guest connected:`, res[1]);
         const guest = await verifyToken(res[0]);
         if (guest === null || !guest) {
           socket.emit("error", "Invalid token");
           return;
         }
+        console.log(`[${getTimeStamp()}]Guest connected:`, guest.guestName);
         const roomUseId = res[1];
         // 取得房間資料
         const roomData = RoomData.get(roomUseId);
@@ -424,8 +426,6 @@ JoinRoom.on("connection", (socket) => {
           roomData.intervalId = null; // 重置 intervalId 以防止重複清除
         }
     
-        // 紀錄人數
-        roomData.roomPeople.push(guest.guestName);
         // console.log("roomData.roomPeople=>", roomData.roomPeople);
         // StartRoom.to(roomUseId).emit("GuestListResponse", roomData.roomPeople);
         socket.join(roomUseId);

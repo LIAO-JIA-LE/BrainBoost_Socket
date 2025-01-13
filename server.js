@@ -231,14 +231,19 @@ const pushQuestion = async (namespace, token, roomUseId) => {
     if(question.data == null){
       return null;
     }
+
     const roomdata = RoomData.get(roomUseId);
+    // 計算結束時間
+    const endTime = Date.now() + (roomdata.timeLimit * 1000);
+
     namespace.to(roomUseId).emit("newQuestion", 
       {
         QuestionData:question.data,
         RoomInfo:{
           roomName:roomdata.roomName,
           roomId:roomdata.roomId,
-          timeLimit:roomdata.timeLimit
+          timeLimit:roomdata.timeLimit,
+          endTime:endTime
         }
       }
     );
@@ -261,8 +266,7 @@ const pushScore = async (namespace, token, roomUseId) => {
     const score = response.data;
     // console.log("ScoreBoard_推播分數", score.data);
     namespace.to(roomUseId).emit("Score", score.data);
-  }
-  catch(error){
+  } catch (error) {
     console.error(`[${getTimeStamp()}]Error fetching score:${error}`);
   }
 };
@@ -434,46 +438,25 @@ StartRoom.on("connection", (socket) => {
   
       // 紀錄人數
       roomData.roomPeople.push(guest.guestName);
-      // console.log("roomData.roomPeople=>", roomData.roomPeople);
-      // StartRoom.to(roomUseId).emit("GuestListResponse", roomData.roomPeople);
+      
+      // 將訪客加入socket房間
       socket.join(roomUseId);
-      // console.log(guest.guestName, "訪客驗證成功並加入房間");
-
-      // 取得資料庫房間的訪客列表
-      // const GuestList = await getGuestListApi(roomUseId);
-      // console.log("GuestList=>", GuestList);
 
       //#region 等待所有訪客加入後，開始推播題目
       if (roomData.peopleLength === roomData.roomPeople.length) {
 
-        // console.log("所有訪客已加入");
         // 等待所有訪客加入後，開始推播題目
         const TStartRoomres = await TStartRoom(roomData.token, roomUseId);
         if (TStartRoomres == null || TStartRoomres.status_code == 400) {
-          // console.log("開始房間失敗回傳", TStartRoomres);
           RoomData.delete(roomUseId);
           socket.emit("error", "開始房間失敗");
-        } 
-        // else {
-        //   console.log("開始房間成功回傳", TStartRoomres.status_code);
-          
-          // 初始化房間人數
-          // roomPeople = [];
-          // roomData.roomPeople = [];
+        }
 
-          // 老師開始房間後，通知所有訪客
-          // JoinRoom.to(roomUseId).emit("StartRoom", { roomUseId });
-        // }
-
-        // const roomInfo = await verifyRoom(res[0], roomUseId);
         try {
-          // console.log("首次推播題目");
           setTimeout(async()=>{await pushQuestion(StartRoom, res[0], roomUseId);},5000);
-
-          // console.log("推播題目成功,設定定時推播題目 roomInfo.timeLimit=>", roomData.timeLimit);
+          
           // 設定一個定時推播題目的間隔
           roomData.intervalId = setInterval( async () => {
-            // console.log("推播題目");
             try {
 
               // 先推撥目前搶答是分數排名
@@ -482,10 +465,8 @@ StartRoom.on("connection", (socket) => {
               // 再推撥題目
               setTimeout(async () => {
                 const result = await pushQuestion(StartRoom, res[0], roomUseId);
-                // console.log("result=>", result);
 
                 if (result === null) {
-                  // console.log("停止推播題目");
                   clearInterval(roomData.intervalId); // 停止計時器
                   StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
                   RoomData.delete(roomUseId);
@@ -493,7 +474,6 @@ StartRoom.on("connection", (socket) => {
               }, 5000);
 
             } catch (error) {
-              // console.error("Failed to push question in interval:", error);
               clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
               StartRoom.to(roomUseId).emit("end", true); // 通知房間結束
               RoomData.delete(roomUseId);
@@ -501,7 +481,6 @@ StartRoom.on("connection", (socket) => {
           }, ( roomData.timeLimit + 5 ) * 1000); // 确保乘以 1000
         } catch (error) {
           clearInterval(roomData.intervalId); // 停止計時器以防止錯誤持續發生
-          // console.error("Failed to push the first question:", error);
         }
       }
       //#endregion
